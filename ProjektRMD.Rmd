@@ -1,0 +1,326 @@
+---
+title: "Projekt sok - 1005"
+author: "Kandidatnr.: 	11"
+date: "05/06/2022"
+output: 
+  html_document:
+    df_print: paged
+---
+
+Github: https://github.com/Sighaa/Projekt-sok-1005-v22 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r pakker, message=FALSE}
+# Laste pakker
+library(tidyverse)
+library(lubridate)
+```
+
+# Oppgave 1
+
+Datasettene er hentet fra: https://data.mendeley.com/datasets/6htjnfs78b/2 
+
+For å kombinere de seks datasettene er felles kategorier i de ulike datasettene identifisert manuelt. For å kombinere ved hjelp av dette, sørges det for at navnene til kategoriene som skal brukes, er de samme på tvers av datasettene. Datasettene kombineres etter disse kategoriene. 
+
+Datasettene med attributter, kriminalstatistikk, demografisk data og statistikk for arbeidsledighet kombineres ved å bruke navn på county. Dette lager et datasettet som så legges på salgsdataene etter butikk nummeret. Til slutt brukes år, måned og dato variablene til å lage en dato som igjen brukes til å lage en uke. Sammen med værstasjon brukes uke til å kombiner med værdataene. Dette gjøres på denne måten fordi værdataene og salgsdataene ikke er registrert samme dag i uken. 
+
+```{r data, message=FALSE}
+# liste med urlene til de ulike datasettene
+urls <- c("https://data.mendeley.com/public-files/datasets/6htjnfs78b/files/26afd5e7-90b1-4301-ac5e-5905b38c4ec2/file_downloaded",
+          "https://data.mendeley.com/public-files/datasets/6htjnfs78b/files/3691994e-2874-4ee6-b215-12e130c96175/file_downloaded",
+          "https://data.mendeley.com/public-files/datasets/6htjnfs78b/files/527e7486-7233-460a-99e0-3529b7cd7d49/file_downloaded",
+          "https://data.mendeley.com/public-files/datasets/6htjnfs78b/files/846ac757-721e-4fd9-a414-5871f60de093/file_downloaded",
+          "https://data.mendeley.com/public-files/datasets/6htjnfs78b/files/b963fdd1-0df9-4257-bd62-65256ec9d57c/file_downloaded",
+          "https://data.mendeley.com/public-files/datasets/6htjnfs78b/files/b8708b3c-c5e8-456e-83f4-9f23f472a840/file_downloaded")
+
+# første del av kombinering av datasettene, lagres som data
+data2 <- read_csv(urls[1]) %>% # henter datasettet med attributter
+  rename(., c(County_Name = Store_County, Weather_Station = Store_Weather_Station)) %>% #Sette ønskede navn på variabler
+  group_by(County_Name) %>% # gruperer etter county
+  left_join(read_csv(urls[2]), by = 'County_Name') %>% # legger til kriminalstatistikk etter county
+  left_join(read_csv(urls[3]), by = 'County_Name') %>% # legger til demmograpisk data etter county
+  left_join(read_csv(urls[4]), by = 'County_Name') %>% # legger til arbeidsledighetsstatistikk etter county
+  ungroup() # gjør at dataen ikke legner er grupert etter county
+
+# andre del av kombinering av datasettenn, lagres som data
+data <- read_csv(urls[5]) %>% # henter datasettet med salgsdata
+  rename(., Store_Num = Store_num) %>% # endrer navn for at det skal matche på tvers av datasett
+  group_by(Store_Num) %>% # gruperer etter butikk nummer
+  left_join(data2, by = 'Store_Num') %>% # legger til dataen fra først del av kombineringen
+  ungroup() %>% # gjør at det ikke lenger gruperes etter butikk nummer
+  mutate(Date = ymd(paste(Year, Month, Day))) %>% # gjør date variablene om til dato 'type'
+  mutate(Weather_Week = week(Date)) %>% # lager en uketallsvaribel basert på datoene
+  group_by(Weather_Week) %>% # gruperer på uketall
+  left_join(read_csv(urls[6]), by = c('Weather_Station', 'Weather_Week')) %>% # bruker uketall og værstasjon til å legge til værstatistikk
+  ungroup() # gjør at dataen ikke lenger er grupert
+
+data %>% # Printer dataen som data frame
+  as.data.frame()
+```
+
+Resultatet blir et datasett med ukentlig salgs og værdata for hver enkelt utsalg, som også inkluderer data for de andre tilgjenglige faktorene.
+
+# Oppgave 2
+
+En ukentlig salgsraport for et enkelt utsalgsted, her er butikk nummer 23 og uke 23 brukt som eksempel. 
+```{r data opg2, message=FALSE}
+utvikling <- data %>% # lage tibbel med utregninger for endring i salg og profitt
+  group_by(Date, Store_Num) %>%  # Gruppere på dato og butikk
+  summarise(total_salg = sum(Sales), total_profitt = sum(Profit)) %>% # # Summerer opp salg og proffit besert på gruppen definert
+  group_by(Store_Num) %>% # Grupperer på butikk 
+  mutate(utvikling1uke_salg = ((total_salg - lag(total_salg)) / lag(total_salg) * 100),
+         utvikling1uke_profitt = ((total_profitt - lag(total_profitt)) / lag(total_profitt) * 100),
+         utvikling4uke_salg = ((total_salg - lag(total_salg, 4)) / lag(total_salg, 4) * 100),
+         utvikling4uke_profitt = ((total_profitt - lag(total_profitt, 4)) / lag(total_profitt, 4) * 100), # regner ut og legger til prosentvis endring i profitt og salg fra sist uke og fra fire uker siden.
+         Uke = week(Date)) %>% # Legger til uke 
+  ungroup() # Ugrupperer
+
+un <- 23 # Deffinerer et ukenummer brukt som eksempel
+bn <- 23 # Deffinerer butikknummer brukt som eksempel
+
+andre <- utvikling %>% # Lager datasett med gjennomsnittlig utvikling i salg og profitt for andre butikker enn den brukt i eksempelet
+  filter(Store_Num != un) %>% # Filtrerer bort dataen for butikken deffinert i bn
+  group_by(Date) %>% # Grupperer på dato
+  summarise(snitt_total_salg = mean(total_salg), 
+            snitt_total_profitt = mean(total_profitt),
+            snitt_1uke_salg = mean(utvikling1uke_salg),
+            snitt_1uke_profitt = mean(utvikling1uke_profitt),
+            snitt_4uke_salg = mean(utvikling4uke_salg),
+            snitt_4uke_profitt = mean(utvikling4uke_profitt)
+            ) %>% # Finner snittet for totalt ukentlig salg, ukentlig profitt, prosentvis endring i disee på 1 og 4 ukers perspektiv. 
+  mutate(Uke = week(Date)) # Legger til ukenummer
+
+butikk <- utvikling %>% # Lagrer utviklingdataen for ønsket butikk og ønsket uke
+  filter(Store_Num == bn, Uke == un) 
+
+resten <- andre %>% # Lagrer utviklingsdataen for resten for ønsket uke
+  filter(Uke == un)
+
+topsellers <- data %>% # Lagre varene som har solgt minst hundre av i ønsket butikk og uke
+  filter(Store_Num == bn, Weather_Week == un, Sold >= 100) %>% # filtrerer for ønsket uke, butikk og minst nummer av salg
+  select(INV_NUMBER) # Velger inv_nummer for å senere kunne identifisere disse produktene
+
+endring_inv <- data %>% # Sette med data for siste ukes endring i salg av individuelle varer
+  filter(Store_Num == bn, between(Weather_Week, un - 1, un)) %>% # Filtrere for ønsket butikk og ønsket uke pluss uka før ønsket uke
+  group_by(INV_NUMBER) %>% # Grupperer på produkt nummer
+  mutate(endring1uke = round((Sold - lag(Sold)) / lag((Sold)) * 100, 2)) %>% # Regner ut prosentvis endring i salg av hver enkelt vare 
+  ungroup() # Fjerner grupering
+```
+
+For å vise den kortsiktige utviklingen i profitt er det inkludert en enkel figur som viser profitt de siste fem ukene. Dette bygger på en antagelse om at mest mulig profitt er bedriftens mål, og at dette dermed kan være nyttig å ha oversikt over.
+
+```{r figur opg2}
+# Figur som viser profitt de siste fem ukene for ønsket butikk og uke
+utvikling %>% 
+  filter(Store_Num == bn, between(Uke, un - 4, un)) %>% 
+  ggplot(aes(x = Uke, y = total_profitt)) +
+  geom_line() +
+  theme_minimal() +
+  theme(legend.position = "top") +
+  labs(x = "Uke",
+       y = "Total profitt",
+       title = "Ukentlig profitt siste 5 uker")
+```
+
+I dette tilfellet kan utsalgets ledelse observere at profitten har gått nedover den siste perioden, men at utviklingen de siste to ukene er positiv. 
+
+Tabellen som følger er ment å skulle gi oversikt over hvordan bedriften gjør det akkurat nå og hvordan denne uken har vært sammenlignet med sist uke og 4 uker siden. Den inneholder også gjennomsnittet av tilsvarende tall for resten av utsalgnene i datasettet. 
+
+Profitt er trukket frem fordi dette er det antatte målet til utsalget, mens salg er inkludert fordi det kan tenkes å være en indikasjon på aktivitetsnivået på utsalget. 
+
+Tallene for prosentvis endring er ment å gi innsikt i hvordan utsalget gjorde det denne uken sammenlignet med seg selv den siste tiden. Tallen for resten av utsalgene er inkludert for å kunne gi perspektiv på tallene til utsalget det gjelder. 
+
+### Status for og utvikling i salg og profitt
+
+|   | Utsalg `r bn`  | Snitt resten  |
+|---|:---:|:---:|
+| Totalt salg \$ | `r butikk$total_salg`   | `r format(resten$snitt_total_salg, scientific = FALSE)`  |
+| Total profit  \$|  `r butikk$total_profitt` | `r format(resten$snitt_total_profitt, scientific = FALSE)`  |
+| Endring siden sist uke salg % | `r butikk$utvikling1uke_salg`  | `r resten$snitt_1uke_salg`  |
+| Endring siden sist uke profitt %  | `r butikk$utvikling1uke_profitt`   | `r resten$snitt_1uke_profitt`  |
+| Endring 4 uker salg % | `r butikk$utvikling4uke_salg`  | `r resten$snitt_4uke_salg` |
+| Endring 4 uker profitt %  |`r butikk$utvikling4uke_profitt`|`r resten$snitt_4uke_profitt`|
+
+I tabellen så ser man at utsalget har lavere salg og profitt enn gjennomsnittet. Man kan se at nedgangen de siste fire ukene har vært en del av en større negativ trend, men at denne utviklingen har vært større i utsalg 23. Man kan også se at utviklingen denne uken har vært bedre i utsalg 23 enn gjennomsnittet. Årsaken til disse avvikene er åpne for utsalgets ledels til å tolke og eventuelt gjøre noe med.
+
+Her vises profitt og prosent endring i profitt for de mest solgte varene denne uken, i dette tilfellet de som har blitt solgt minst 100 av. Tanken er at disse kan være nyttige å ha ekstra oversikt over, fordi de antageligvis blir kjøpt av mange av kundene til utsalget. 
+
+### Varer med minst 100 salg siste uken
+
+```{r tabell opg2}
+endring_inv %>% # Tabell med produktene som er solgt minst 100 av ved utsalgt og uken deffinert tidligere
+  filter(INV_NUMBER %in% topsellers$INV_NUMBER, Weather_Week == un) %>% # filtrerer varene som har solgt over 100 og for gjeldene uke
+  select(Description, Sold, Profit, endring1uke) %>% # Velge ønskede varibler
+  arrange(desc(Sold)) %>% # Sorterer nedadgående etter antall solgte
+  rename(Produkt = Description, 'Antall solgt' = Sold, 'Profitt ($)' = Profit, 'Endring siste uke salg(%)' = endring1uke) %>% # Endrer til mer presentable navn
+  as.data.frame # Som data frame
+```
+
+I dette tilfellet ser man at de flest av disse har hatt betydelig økning i salg. Man kan også observere at mange av de mest solgte produktene ikke er sandwicher men, varer som drikke og chips. 
+
+De påfølgende tabellene som viser varene med størst prosentvis økning og nedgang i salg gjeldene uke sammenlignet med uken før. For å ikke inkludere varer med små absolutte endringer er de med mindre enn 25 salg filtrert bort. Disse tabellene er ment å vise varer som har hatt særlig stor endring. Det er flere potensielle grunner til at disse kan være av interesse. Det kan være at de har spilt en særlig rolle i den totale utviklingen, at man kan fange opp effekten av et tilbud eller slutten av et tidligere tilbud. 
+
+### Varer med størst prosentvis vekst i salg siste uke (minst 25 solgt)
+
+```{r tabell2 opg2}
+# Tabell med de fem varene med størst prosentvis økning i salg siste uken av varene med minst 25 salg
+endring_inv %>% 
+  filter(Weather_Week == un, Sold >= 25) %>% 
+  select(Description, Sold, Profit, endring1uke) %>%
+  arrange(desc(endring1uke)) %>% 
+  rename(Produkt = Description, 'Antall solgt' = Sold, 'Profitt ($)' = Profit, 'Endring siste uke salg(%)' = endring1uke) %>%
+  as.data.frame %>% 
+  head(5)
+```
+Her ser man for eksempel at månedes sub har solgt særlig godt, hvis dette sammenfaller med et månedskifte så kan dette være en indiksajon på populariteten til dette tilbudet. Årsaken kan være at den nye subben er mer populær, eller at mange velger å teste nyheter. Dette kan også komme av tilfeldig variasjon, men gir mulighet for enkelte utsalg å tolke disse endringen med utgangspunkt i sin kunnskap om utsalget og sine kunder. 
+
+### Varer med størst prosentvis nedgang i salg siste uke (minst 25 solgt)
+
+```{r tabell3 opg2}
+# Tabell med de fem varene med størst prosentvis nedgang i salg siste uken av varene med minst 25 salg
+endring_inv %>% 
+  filter(Weather_Week == un, Sold >= 25) %>% 
+  select(Description, Sold, Profit, endring1uke) %>%
+  arrange(endring1uke) %>% 
+  rename(Produkt = Description, 'Antall solgt' = Sold, 'Profitt ($)' = Profit, 'Endring siste uke salg(%)' = endring1uke) %>%
+  as.data.frame %>% 
+  head(5)
+```
+
+# Oppgave 3
+
+Månedlig salgsrapport til konsernledelsen.
+
+Den første figuren viser månedlig inntekt fra salg, og profitten i konsernet de siste fem månedene. Dette vil kunne gi konsernledelsen oversikt over hvordan bedriften gjør det og hvordan utviklingen er. 
+
+```{r figur1 opg3}
+data %>% # Figur som viser total månedlig salg og profitt siste fem måneder
+  group_by(Month) %>% # Grupperer på måned så regnes summen av måned og profitt ut
+  summarise(Totalt_salg = sum(Sales), Total_profitt = sum(Profit), show.legend = TRUE) %>% 
+  filter(between(Month, 6, 10)) %>% # filtrerer ønsket periode
+  ggplot(aes(x = Month, y = Totalt_salg)) + # lager område plot
+  geom_area() +
+  geom_area(aes(Month, Total_profitt), fill = 'green4') +
+  theme_minimal() +
+  theme(legend.position = "top") +
+  scale_y_continuous(labels = ~ format(.x, scientific = FALSE)) + # sørger for at tallene på y aksen skrives ut og ikke i vitenskaplig format
+  labs(x = "Måned",
+       y = "Dollar",
+       title = "Månedlig samlet inntekt (Grå) og profitt (Grønn)")
+```
+
+Her ser man at både inntekt og profitt har sunket etter sommeren. 
+
+Kakediagrammet viser hvilke geografiske områder profitten kommer fra. Dette er for å gi et perspektiv på hvilke av countyene som har størst betydning for bedriften, dette styres naturligvis delvis av hvor mange utsalg som er i hvert county. I disse datasettene er dette lett å ha oversikt over, men tanken er at dersom konsernet har data fra et større utvalg utsalg så kan denne oversikten bli mer nyttig. 
+
+```{r figur2 opg3, message=FALSE}
+kake <- data %>% # Dataen til et kakediagram som viser hvilke områder profitten kommer fra
+  group_by(måned = format(as.Date(Date), "%Y-%m"), County_Name) %>% # Grupperer på måned og county
+  summarise(total_profitt = sum(Profit)) %>% # regner ut total profitt
+  mutate(prosent = 100 * total_profitt / sum(total_profitt)) %>% # regner ut prosentandel av profitt per county
+  filter(måned == '2012-10') # filtrer uten ønsket måned
+
+# Lager kakediagram med prosenttall og farget etter county
+pie(kake$total_profitt, labels = round(kake$prosent, 1), main = 'Andel av profitt (%)', col = rainbow(length(kake$total_profitt)))
+legend('left', kake$County_Name, fill = rainbow(length(kake$total_profitt)))
+```
+
+Vi ser at power- og farm county er særlig viktige for konsernet og kan dermed være verdt å holde et ekstra øye med i påfølgende plott. Dette viser prosentvis endring i profitt i hvert county denne måneden, inkludert gjennomsnittet. Dette gir en oversikt som kan gi konsernledelsen mulighet til å identifisere lokal utvikling. 
+
+```{r figur3 opg3, message=FALSE}
+data %>% # Plot som viser prosentvis endring i porfitt per county
+  group_by(måned = format(as.Date(Date), "%Y-%m"), County_Name) %>% # Grupperer på måned og county
+  summarise(total_profitt = sum(Profit)) %>% # Regner ut summert profitt
+  group_by(County_Name) %>% # Grupperer på county, så regnes prosentvis endring i profitt fra sist måned ut
+  mutate(pros_endring_profitt = ((total_profitt - lag(total_profitt)) / lag(total_profitt) * 100)) %>% 
+  ungroup()%>% 
+  filter(måned == '2012-10') %>% # filtrerer så man får ønsket måned
+  ggplot(aes(x = County_Name, y = pros_endring_profitt)) + # Deffinerer x og y akse
+  geom_col() + # velgger kolloneplott
+  geom_hline(aes(yintercept = mean(pros_endring_profitt)), color = 'blue') + # legger til snitt linje
+  theme_minimal() +
+  labs(x = "County",
+       y = "Endring i månedlig profitt (%)",
+       title = "Månedlig prosentvis endring i profitt per county, linjen er gjennomsnittet")
+```
+
+I dette tilfellet kan man se en nedgang på tvers av geografiske linjer, med noe variasjon. Utifra dette kan konserledelsen anta at nedgangen den siste tiden ikke er knyttet til noen lokale geografiske forhold. 
+
+Den siste tabellen i denne delen viser hvordan endring i og andel av profitt for ulike prisgrupper. Dette er ment som et eksempel på hvordan man kan isolere utviklingen ved ulike produktgrupper, her priskategorier. 
+
+```{r tabell opg3, message=FALSE}
+data %>% # Tabell med utvikling og viktighet i ulike prisintervaller
+  mutate(prisgruppe = cut(Price, c(-2, 2, 5, 7.5, 25, 75))) %>% # Lage prsiintervaller
+  group_by(prisgruppe, måned = format(as.Date(Date), "%Y-%m")) %>% # Gruppere på prisintervall og måned
+  summarise(total_profitt = round(sum(Profit)))  %>% # sum av profitt
+  mutate(endringpros = round(((total_profitt - lag(total_profitt)) / lag(total_profitt) * 100), 2)) %>%   # regne ut prosentvis endring
+  filter(måned == '2012-10') %>% # filtrere for ønsket måned
+  mutate(andel = round(100 * total_profitt / sum(.$total_profitt), 2)) %>% # regne ut andel av profitt
+  rename('Pris intervall ($)' = prisgruppe, 'Månedlig profitt ($)' = total_profitt, 'Endring månedlig profitt(%)' = endringpros, 'Andel av månedlig profitt (%)' = andel) %>% # endre til mer presentable navn
+  select(!måned) # fjerne måned
+```
+
+Her kan man for eksempel observere at nedgangen i profitt er større jo høyere pris. Man kan også se at de dyreste varene spiller en veldig liten rolle i bedriftens profitt. Informasjon som dette kan være nyttig for konsernledelsen som kan identifisere hvor de vil fokusere markedsføring, eller kan knyttes opp mot grunnen til utviklingen i konsernet. 
+
+# Oppgave 4
+
+Muligheten for å bruke dataene til å vurdere etablering av nye utsalg, er først og fremst gjennom å se på samenheng mellom ulike faktorer og profitt. Dette er ikke nødvendigvis nøyaktig vitenskap, men noe som kan gi anslag for effekten av ulike ting. Disse anslagene kan igjen brukes til å vurdere ulike potensielle utsalgssteder opp mot hverandre, og opp mot kostnader ved utbygging og drift. 
+
+```{r data opg4, message=FALSE}
+data3 <- read_csv(urls[5]) %>% # henter datasettet med salgsdata
+  rename(., Store_Num = Store_num) %>% # endrer navn for at det skal matche på tvers av datasett
+  mutate(Date = ymd(paste(Year, Month, Day))) %>% # gjør date variablene om til dato 'type'
+  group_by(Store_Num, Date) %>% # gruppere på butikk og dato
+  summarise(profitt = sum(Profit)) %>% # summere opp profitt basert på gruppene
+  group_by(Store_Num) %>% # gruperer etter butikk nummer
+  left_join(data2, by = 'Store_Num') %>% # legger til dataen fra først del av kombineringen
+  ungroup() %>% # gjør at det ikke lenger gruperes etter butikk nummer
+  mutate(Weather_Week = week(Date)) %>% # lager en uketallsvaribel basert på datoene
+  group_by(Weather_Week) %>% # gruperer på uketall
+  left_join(read_csv(urls[6]), by = c('Weather_Station', 'Weather_Week')) %>% # bruker uketall og værstasjon til å legge til værstatistikk
+  ungroup() # gjør at dataen ikke lenger er grupert
+```
+
+En måte å gjøre dette er regresjon. Her er et eksempel med sammenhengen mellom estimert leiepris og ukentlig profitt. Vi antar at maksimal ukentlig profitt er målet og vil dermed her få en indikasjon på om leie henger smammen med profitt. Dette kan gjøres med andre faktorer også, men det er viktig å være bevisst på at sammenhengene ikke nødvendigvis tilsier at profitt kommer av faktoren sammenhengen er med. 
+
+```{r figur1 opg4, message=FALSE}
+data3 %>% 
+  ggplot(aes(x = Annual_Rent_Estimate, y = profitt, color = County_Name)) + 
+  geom_point() +
+  geom_smooth(method="lm", col="black") +
+  theme_minimal() +
+  theme(legend.position = "top") +
+  labs(x = "Estimert årlig leie",
+       y = "Profitt",
+       title = "Leie og profitt ved ulike utsalg for hurtigmat")
+
+cor.test(data3$Annual_Rent_Estimate, data3$profitt)
+```
+
+I dette tilfellet kan man se en positiv korrelasjon og at sammenhengen er statistisk signifikant. Korrelasjonen innebærer ikke at bedriften burde finne lokasjonen med høyest mulig leie for å maksimere profitt. Den kan tolkes som at leie er en indikator på tilstedeværelse av andre faktorer som bidrar til økt profitt, for eksempel størrelsen på lokalet eller et urbant området. Sammenhengen kan også være at bedriften må ha høyere profitt for å være villig til å betale høyere leie. Tendensen man kan se er at leien er verdt det i form av økt profitt. 
+
+En annen måte man kan se på effekten av noe er gjennomsnittet for utsalg med og uten faktoren. For eksempel med eller uten drive through eller om det er en skole i nærheten. Dette kan gi et anslag på verdien av disse faktorene.
+
+```{r tabell opg4, message=FALSE}
+data3 %>% 
+  group_by(Store_Drive_Through) %>% 
+  summarise(snitt_profitt = mean(profitt)) %>% 
+  mutate(pros_forskjell = round(100 * (snitt_profitt - lag(snitt_profitt))/ lag(snitt_profitt), 2)) %>% 
+  rename('Drive through' = Store_Drive_Through, 'Gjennomsnittlig ukentlig profitt ($)' = snitt_profitt, 'Forskjell (%)' = pros_forskjell)
+```
+```{r tabell2 opg4, message=FALSE}
+data3 %>% 
+  group_by(Store_Near_School) %>% 
+  summarise(snitt_profitt = mean(profitt)) %>% 
+  mutate(pros_forskjell = round(100 * (snitt_profitt - lag(snitt_profitt))/ lag(snitt_profitt), 2)) %>% 
+  rename('Nær skole' = Store_Near_School, 'Gjennomsnittlig ukentlig profitt ($)' = snitt_profitt, 'Forskjell (%)' = pros_forskjell)
+```
+
+Her kan vi anslå at å ha en drive though er mer verdifullt enn å være nært en skole. Drive through kan altså være verdt å prioritere. Dette er gitt disse tilgjenglige dataene med kun noen få utsalgssteder. Påliteligheten til denne type annslag, blir bedre ved flere utsalgsteder med større variasjon. Dette fordi man da får flest mulige ulike kombinasjoner av faktorer som gir mindre sårbarhet for at sammenhengene skyldes faktorer man ikke tar hensyn til. 
+
+Kildeliste:
+
+Spaulding, Trent; Hassler, Edgar; Edwards, Charles; Cazier, Joseph (2020), “Sandwich Analytics: A Dataset Comprising One Year’s Weekly Sales Data Correlated with Crime, Demographics, and Weather”, Mendeley Data, V2, doi: 10.17632/6htjnfs78b.2 hentet 06.06.2022 fra https://data.mendeley.com/datasets/6htjnfs78b/2 
